@@ -1,0 +1,20 @@
+[package]
+name = "weathered"
+version = "0.1.0"
+authors = ["teo3300"]
+edition = "2021"
+description = "Weather widget based on open-meteo's API"
+readme = "README.md"
+license = "MIT"
+
+keywords = ["weather", "widget"]
+
+# Do not publish for now
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = "0.11.16"
+strum = "0.24"
+strum_macros = "0.24"

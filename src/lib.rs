@@ -1,9 +1,9 @@
 use std::fmt;
 use strum_macros::Display;
 
-const BASE_URL: &'static str = "https://api.open-meteo.com/v1/forecast";
+const BASE_URL: &str = "https://api.open-meteo.com/v1/forecast";
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate temperature units
 pub enum Temperature {
@@ -11,7 +11,7 @@ pub enum Temperature {
     fahrenheit,
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate windspeed units
 pub enum Speed {
@@ -21,7 +21,7 @@ pub enum Speed {
     kn,
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate precipitation units
 pub enum Precipitation {
@@ -29,7 +29,7 @@ pub enum Precipitation {
     inch,
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate valid time formats
 pub enum TimeFormat {
@@ -37,7 +37,7 @@ pub enum TimeFormat {
     unixtime,
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate cell selection
 pub enum Cell {
@@ -46,25 +46,46 @@ pub enum Cell {
     nearest,
 }
 
-#[derive(Display)]
+#[derive(Copy, Clone)]
+#[allow(non_camel_case_types)]
+/// Enumerate timezones
+/// Provide timezone in format
+///     ("Continent", "Country")
+/// or specify automatic timezone
+///     "auto"
+pub enum Timezone<'a> {
+    explicit(&'a str, &'a str),
+    auto,
+}
+
+impl<'a> Timezone<'a> {
+    pub fn get(&self) -> String {
+        match self {
+            Timezone::explicit(continent, country) => continent.to_string() + "%2F" + country,
+            Timezone::auto => "auto".to_owned(),
+        }
+    }
+}
+
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate settings and related value
-pub enum Settings {
+pub enum Settings<'a> {
     elevation(f32),
     current_weather(bool),
     temperature_unit(Temperature),
     windspeed_unit(Speed),
     precipitation_unit(Precipitation),
     timeformat(TimeFormat),
-    timezone(String),
+    timezone(Timezone<'a>),
     past_days(u8),
     forecast_days(u8),
-    start_date(String),
-    end_date(String),
+    start_date(&'a str),
+    end_date(&'a str),
     cell_selection(Cell),
 }
 
-impl Settings {
+impl<'a> Settings<'a> {
     fn get(&self) -> String {
         match self {
             Settings::elevation(t) => t.to_string(),
@@ -75,14 +96,13 @@ impl Settings {
             Settings::cell_selection(t) => t.to_string(),
             Settings::timeformat(t) => t.to_string(),
             Settings::past_days(t) | Settings::forecast_days(t) => t.to_string(),
-            Settings::timezone(t) | Settings::start_date(t) | Settings::end_date(t) => {
-                t.to_string()
-            }
+            Settings::timezone(t) => t.get(),
+            Settings::start_date(t) | Settings::end_date(t) => t.to_string(),
         }
     }
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate all Hourly flags
 pub enum Hourly {
@@ -134,7 +154,7 @@ pub enum Hourly {
     is_day,
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate available pressure variables
 pub enum PressureVar {
@@ -161,11 +181,11 @@ impl PressureVar {
             | PressureVar::winddirection(h)
             | PressureVar::geopotential_height(h) => h,
         };
-        format!("{}_{}hPa", self.to_string(), value)
+        format!("{}_{}hPa", self, value)
     }
 }
 
-#[derive(Display)]
+#[derive(Display, Copy, Clone)]
 #[allow(non_camel_case_types)]
 /// Enumerate Daily data flags
 pub enum Daily {
@@ -193,70 +213,54 @@ pub enum Daily {
     uv_index_clear_sky_max,
 }
 
-/// Geographic coordinates
+// Implement typestates to avoid requesting an URL without coordinates
+// region:    --- ForecastStates
+#[derive(Default)]
+pub struct NoCoordinates;
+#[derive(Default)]
 pub struct Coordinates {
     latitude: f32,
     longitude: f32,
 }
+// endregion: --- ForecastStates
 
+// Generic Forecast type, with or without coordinates
 /// Basic data structure to keep all request's data
-pub struct Forecast {
-    coordinates: Coordinates,
-    settings: Vec<Settings>,
+#[derive(Default)]
+pub struct Forecast<'a, C> {
+    coordinates: C,
+    settings: Vec<Settings<'a>>,
     hourly: Vec<Hourly>,
     pressure_var: Vec<PressureVar>,
     daily: Vec<Daily>,
 }
 
-impl Forecast {
+// Create a generic forecast without coordinates,
+// Provide a method to set coordinates only if they are not already present
+impl<'a> Forecast<'a, NoCoordinates> {
     /// Initialize Forecast object
     pub fn new() -> Self {
-        Forecast {
-            coordinates: Coordinates {
-                latitude: Default::default(),
-                longitude: Default::default(),
-            },
-            settings: Vec::new(),
-            hourly: Vec::new(),
-            pressure_var: Vec::new(),
-            daily: Vec::new(),
-        }
+        Forecast::default()
     }
 
     /// Specify coordinates (latitude, longitude)
     /// These two are the only mandatory fields
-    pub fn coord(mut self, latitude: f32, longitude: f32) -> Self {
-        self.coordinates = Coordinates {
-            latitude,
-            longitude,
-        };
-        self
+    pub fn coord(self, latitude: f32, longitude: f32) -> Forecast<'a, Coordinates> {
+        Forecast {
+            coordinates: Coordinates {
+                latitude,
+                longitude,
+            },
+            settings: self.settings,
+            hourly: self.hourly,
+            pressure_var: self.pressure_var,
+            daily: self.daily,
+        }
     }
+}
 
-    /// Add optional settings
-    pub fn settings(mut self, setting: Settings) -> Self {
-        self.settings.push(setting);
-        self
-    }
-
-    /// Get hourly value for a specific data
-    pub fn hourly(mut self, hourly: Hourly) -> Self {
-        self.hourly.push(hourly);
-        self
-    }
-
-    /// Get daily value for a specific data
-    pub fn daily(mut self, daily: Daily) -> Self {
-        self.daily.push(daily);
-        self
-    }
-
-    /// Get Pressure Level-related variables
-    pub fn pressure_var(mut self, pressure_var: PressureVar) -> Self {
-        self.pressure_var.push(pressure_var);
-        self
-    }
-
+// Allow creating final URL only if it's valid
+impl<'a> Forecast<'a, Coordinates> {
     /// Convert the forecast struct into a valid URL
     fn to_sring(&self) -> String {
         let mut url = String::from(BASE_URL);
@@ -268,18 +272,18 @@ impl Forecast {
             .as_str(),
         );
         for el in &self.settings {
-            url.push_str(format!("&{}={}", el.to_string(), el.get()).as_str());
+            url.push_str(format!("&{}={}", el, el.get()).as_str());
         }
-        if self.hourly.len() > 0 {
+        if !self.hourly.is_empty() {
             url.push_str("&hourly=");
             for el in &self.hourly {
-                url.push_str(format!(",{}", el.to_string()).as_str());
+                url.push_str(format!(",{}", el).as_str());
             }
         }
-        if self.daily.len() > 0 {
+        if !self.daily.is_empty() {
             url.push_str("&daily=");
             for el in &self.daily {
-                url.push_str(format!(",{}", el.to_string()).as_str());
+                url.push_str(format!(",{}", el).as_str());
             }
         }
         for el in &self.pressure_var {
@@ -289,9 +293,45 @@ impl Forecast {
     }
 }
 
-impl fmt::Display for Forecast {
+// Used for format! macro
+impl<'a> fmt::Display for Forecast<'a, Coordinates> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_sring())
+    }
+}
+
+// Generic settings can be added both before and after coordinates
+impl<'a, C> Forecast<'a, C> {
+    /// Add optional settings
+    pub fn settings(mut self, settings: &[Settings<'a>]) -> Self {
+        for el in settings.iter() {
+            self.settings.push(*el);
+        }
+        self
+    }
+
+    /// Get hourly value for a specific data
+    pub fn hourly(mut self, hourly: &[Hourly]) -> Self {
+        for el in hourly.iter() {
+            self.hourly.push(*el);
+        }
+        self
+    }
+
+    /// Get daily value for a specific data
+    pub fn daily(mut self, daily: &[Daily]) -> Self {
+        for el in daily.iter() {
+            self.daily.push(*el);
+        }
+        self
+    }
+
+    /// Get Pressure Level-related variables
+    pub fn pressure_var(mut self, pressure_var: &[PressureVar]) -> Self {
+        for el in pressure_var.iter() {
+            self.pressure_var.push(*el);
+        }
+        self
     }
 }
 
@@ -304,16 +344,16 @@ mod tests {
     fn url_creation() {
         let forecast = Forecast::new()
             .coord(50.1, 50.1)
-            .settings(Settings::elevation(1000.1))
-            .hourly(Hourly::rain)
-            .hourly(Hourly::cape)
-            .pressure_var(PressureVar::dewpoint(50))
-            .daily(Daily::sunrise)
-            .pressure_var(PressureVar::windspeed(30))
-            .daily(Daily::sunset);
+            .settings(&[
+                Settings::elevation(1000.1),
+                Settings::timezone(Timezone::explicit("Europe", "London")),
+            ])
+            .hourly(&[Hourly::rain, Hourly::cape])
+            .daily(&[Daily::sunrise, Daily::sunset])
+            .pressure_var(&[PressureVar::dewpoint(50), PressureVar::windspeed(30)]);
 
         assert_eq!(
-            format!("{forecast}"),
-            "https://api.open-meteo.com/v1/forecast?latitude=50.1&longitude=50.1&elevation=1000.1&hourly=,rain,cape&daily=,sunrise,sunset&dewpoint_50hPa&windspeed_30hPa")
+            forecast.to_string(),
+            "https://api.open-meteo.com/v1/forecast?latitude=50.1&longitude=50.1&elevation=1000.1&timezone=Europe%2FLondon&hourly=,rain,cape&daily=,sunrise,sunset&dewpoint_50hPa&windspeed_30hPa")
     }
 }
